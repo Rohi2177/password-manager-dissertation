@@ -1,0 +1,168 @@
+theory PasswordManagerBrokerFinal
+begin
+
+/*
+  Symbolic model of one complete Vault Broker permission lifecycle.
+
+  Attacker and trust assumptions
+  ------------------------------
+  - The visible GUI and IPC messages are controlled by a Dolev-Yao attacker.
+    In/Out facts let the attacker observe, alter, block, create, and replay them.
+  - The Broker, the Vault Key, and the operating-system process boundary are
+    trusted. The key is carried only in private Broker state facts.
+  - Broker-owned user approval, including the Windows Hello decision, is
+    abstracted by ApproveAndIssueCapability. Windows Hello is not modelled.
+  - The capability is fresh and bound to one record, one action, and one unlock
+    generation. A linear state fact permits only one outcome: use, expiry, or
+    locking.
+  - Expiry is a logical transition. This model checks that an expired capability
+    cannot release a password; it does not verify the Python ten-second clock.
+
+  The model deliberately follows a single permission lifecycle. Tamarin may
+  instantiate the lifecycle repeatedly, while each instance remains small
+  enough for automated proof search.
+*/
+
+rule InitializeVault:
+  [ Fr(~vault_key), Fr(~generation), Fr(~record), Fr(~password) ]
+  --[ VaultInitialized(~vault_key, ~generation),
+      CredentialAvailable(~generation, ~record, ~password) ]->
+  [ ReadyForRequest(~generation, ~vault_key, ~record, ~password),
+    Out(~record) ]
+
+rule RequestAction:
+  [ In(<record, action>) ]
+  --[ Requested(record, action) ]->
+  [ Pending(record, action) ]
+
+rule ApproveAndIssueCapability:
+  [ ReadyForRequest(generation, vault_key, record, password),
+    Pending(record, action),
+    Fr(~capability) ]
+  --[ Approved(record, action),
+      CapabilityIssued(~capability, record, action, generation) ]->
+  [ CapabilityReady(
+      ~capability, record, action, generation, vault_key, password
+    ),
+    Out(~capability) ]
+
+rule UseCapability:
+  [ CapabilityReady(
+      capability, record, action, generation, vault_key, password
+    ),
+    In(<capability, record, action>) ]
+  --[ SecretReleased(capability, record, action, password, generation),
+      CapabilityUsed(capability) ]->
+  [ ReleasedState(generation, vault_key),
+    Out(password) ]
+
+rule ExpireCapability:
+  [ CapabilityReady(
+      capability, record, action, generation, vault_key, password
+    ) ]
+  --[ CapabilityExpired(capability, generation) ]->
+  [ ExpiredState(generation, vault_key) ]
+
+rule LockBeforeCapability:
+  [ ReadyForRequest(generation, vault_key, record, password),
+    In('lock') ]
+  --[ VaultLocked(generation) ]->
+  [ LockedState(generation, vault_key) ]
+
+rule LockWithCapability:
+  [ CapabilityReady(
+      capability, record, action, generation, vault_key, password
+    ),
+    In('lock') ]
+  --[ VaultLocked(generation) ]->
+  [ LockedState(generation, vault_key) ]
+
+rule LockAfterExpiry:
+  [ ExpiredState(generation, vault_key), In('lock') ]
+  --[ VaultLocked(generation) ]->
+  [ LockedState(generation, vault_key) ]
+
+rule LockAfterRelease:
+  [ ReleasedState(generation, vault_key), In('lock') ]
+  --[ VaultLocked(generation) ]->
+  [ LockedState(generation, vault_key) ]
+
+/* A complete approved reveal exists, so the safety lemmas are not vacuous. */
+lemma executability:
+  exists-trace
+  "Ex capability record password generation vault_key #init #request
+      #issue #release.
+      VaultInitialized(vault_key, generation) @ init
+    & CredentialAvailable(generation, record, password) @ init
+    & Requested(record, 'reveal_password') @ request
+    & CapabilityIssued(
+        capability, record, 'reveal_password', generation
+      ) @ issue
+    & SecretReleased(
+        capability, record, 'reveal_password', password, generation
+      ) @ release
+    & init < request & request < issue & issue < release"
+
+/* Every password release is preceded by approval for its record and action. */
+lemma approval_required_before_release:
+  "All capability record action password generation #release.
+      SecretReleased(
+        capability, record, action, password, generation
+      ) @ release
+    ==> (Ex #approval.
+          Approved(record, action) @ approval
+        & approval < release)"
+
+/* The released password and scope match the exact issued capability. */
+lemma release_matches_issued_scope_and_password:
+  "All capability record action password generation #release.
+      SecretReleased(
+        capability, record, action, password, generation
+      ) @ release
+    ==> (Ex #issue #available.
+          CapabilityIssued(
+            capability, record, action, generation
+          ) @ issue
+        & CredentialAvailable(
+            generation, record, password
+          ) @ available
+        & issue < release
+        & available < release)"
+
+/* An expired capability cannot release a password. If the same generation is
+   eventually locked after a release, that release must precede the lock. */
+lemma expiry_and_lock_prevent_late_release:
+  "(All capability record action password generation #expired #release.
+       CapabilityExpired(capability, generation) @ expired
+     & SecretReleased(
+         capability, record, action, password, generation
+       ) @ release
+     ==> F)
+   &
+   (All capability record action password generation #locked #release.
+       VaultLocked(generation) @ locked
+     & SecretReleased(
+         capability, record, action, password, generation
+       ) @ release
+     ==> release < locked)"
+
+/* A single capability cannot produce two distinct release events. */
+lemma no_capability_replay:
+  "All capability record1 record2 action1 action2 password1 password2
+       generation1 generation2 #i #j.
+      SecretReleased(
+        capability, record1, action1, password1, generation1
+      ) @ i
+    & SecretReleased(
+        capability, record2, action2, password2, generation2
+      ) @ j
+    ==> #i = #j"
+
+/* The attacker never learns a Vault Key generated inside the trusted Broker. */
+lemma vault_key_secrecy:
+  "All vault_key generation #created #known.
+      VaultInitialized(vault_key, generation) @ created
+    & K(vault_key) @ known
+    ==> F"
+
+end

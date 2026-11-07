@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "password-manager"
+version = "0.8.0"
+description = "Offline password manager"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "argon2-cffi>=25.1.0,<26",
+    "cryptography>=50.0.1,<51",
+    "PySide6>=6.10.1,<6.12",
+]
+
+[project.gui-scripts]
+password-manager = "password_manager.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+pythonpath = ["src"]
+testpaths = ["tests"]
+qt_api = "pyside6"
+
+[tool.coverage.run]
+branch = true
+source = ["password_manager"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "S", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105"]
+"src/password_manager/core/passphrases.py" = ["S105"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["password_manager"]
+mypy_path = "src"

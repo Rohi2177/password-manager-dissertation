@@ -1,0 +1,288 @@
+maude tool: 'maude'
+ checking version: 3.5.1. OK.
+ checking installation: OK.
+[Theory PasswordManagerBrokerFinal] Theory loaded
+[Theory PasswordManagerBrokerFinal] Theory translated
+[Theory PasswordManagerBrokerFinal] Derivation checks started
+[Theory PasswordManagerBrokerFinal] Derivation checks ended
+[Theory PasswordManagerBrokerFinal] Theory closed
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+theory PasswordManagerBrokerFinal
+
+begin
+
+// Function signature and definition of the equational theory E
+
+functions: fst/1, pair/2, snd/1
+equations: fst(<x.1, x.2>) = x.1, snd(<x.1, x.2>) = x.2
+
+rule (modulo E) InitializeVault:
+   [ Fr( ~vault_key ), Fr( ~generation ), Fr( ~record ), Fr( ~password ) ]
+  --[
+  VaultInitialized( ~vault_key, ~generation ),
+  CredentialAvailable( ~generation, ~record, ~password )
+  ]->
+   [
+   ReadyForRequest( ~generation, ~vault_key, ~record, ~password ),
+   Out( ~record )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) RequestAction:
+   [ In( <record, action> ) ]
+  --[ Requested( record, action ) ]->
+   [ Pending( record, action ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) ApproveAndIssueCapability:
+   [
+   ReadyForRequest( generation, vault_key, record, password ),
+   Pending( record, action ), Fr( ~capability )
+   ]
+  --[
+  Approved( record, action ),
+  CapabilityIssued( ~capability, record, action, generation )
+  ]->
+   [
+   CapabilityReady( ~capability, record, action, generation, vault_key,
+                    password
+   ),
+   Out( ~capability )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) UseCapability:
+   [
+   CapabilityReady( capability, record, action, generation, vault_key,
+                    password
+   ),
+   In( <capability, record, action> )
+   ]
+  --[
+  SecretReleased( capability, record, action, password, generation ),
+  CapabilityUsed( capability )
+  ]->
+   [ ReleasedState( generation, vault_key ), Out( password ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) ExpireCapability:
+   [
+   CapabilityReady( capability, record, action, generation, vault_key,
+                    password
+   )
+   ]
+  --[ CapabilityExpired( capability, generation ) ]->
+   [ ExpiredState( generation, vault_key ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) LockBeforeCapability:
+   [
+   ReadyForRequest( generation, vault_key, record, password ), In( 'lock' )
+   ]
+  --[ VaultLocked( generation ) ]->
+   [ LockedState( generation, vault_key ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) LockWithCapability:
+   [
+   CapabilityReady( capability, record, action, generation, vault_key,
+                    password
+   ),
+   In( 'lock' )
+   ]
+  --[ VaultLocked( generation ) ]->
+   [ LockedState( generation, vault_key ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) LockAfterExpiry:
+   [ ExpiredState( generation, vault_key ), In( 'lock' ) ]
+  --[ VaultLocked( generation ) ]->
+   [ LockedState( generation, vault_key ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) LockAfterRelease:
+   [ ReleasedState( generation, vault_key ), In( 'lock' ) ]
+  --[ VaultLocked( generation ) ]->
+   [ LockedState( generation, vault_key ) ]
+
+  /* has exactly the trivial AC variant */
+
+lemma executability:
+  exists-trace
+  "∃ capability record password generation vault_key #init #request #issue
+     #release.
+    (((((((VaultInitialized( vault_key, generation ) @ #init) ∧
+          (CredentialAvailable( generation, record, password ) @ #init)) ∧
+         (Requested( record, 'reveal_password' ) @ #request)) ∧
+        (CapabilityIssued( capability, record, 'reveal_password', generation
+         ) @ #issue)) ∧
+       (SecretReleased( capability, record, 'reveal_password', password,
+                        generation
+        ) @ #release)) ∧
+      (#init < #request)) ∧
+     (#request < #issue)) ∧
+    (#issue < #release)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ capability record password generation vault_key #init #request #issue
+   #release.
+  (VaultInitialized( vault_key, generation ) @ #init) ∧
+  (CredentialAvailable( generation, record, password ) @ #init) ∧
+  (Requested( record, 'reveal_password' ) @ #request) ∧
+  (CapabilityIssued( capability, record, 'reveal_password', generation
+   ) @ #issue) ∧
+  (SecretReleased( capability, record, 'reveal_password', password,
+                   generation
+   ) @ #release)
+ ∧
+  (#init < #request) ∧ (#request < #issue) ∧ (#issue < #release)"
+*/
+by sorry
+
+lemma approval_required_before_release:
+  all-traces
+  "∀ capability record action password generation #release.
+    (SecretReleased( capability, record, action, password, generation
+     ) @ #release) ⇒
+    (∃ #approval.
+      (Approved( record, action ) @ #approval) ∧ (#approval < #release))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ capability record action password generation #release.
+  (SecretReleased( capability, record, action, password, generation
+   ) @ #release)
+ ∧
+  ∀ #approval.
+   (Approved( record, action ) @ #approval) ⇒ ¬(#approval < #release)"
+*/
+by sorry
+
+lemma release_matches_issued_scope_and_password:
+  all-traces
+  "∀ capability record action password generation #release.
+    (SecretReleased( capability, record, action, password, generation
+     ) @ #release) ⇒
+    (∃ #issue #available.
+      (((CapabilityIssued( capability, record, action, generation ) @ #issue) ∧
+        (CredentialAvailable( generation, record, password ) @ #available)) ∧
+       (#issue < #release)) ∧
+      (#available < #release))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ capability record action password generation #release.
+  (SecretReleased( capability, record, action, password, generation
+   ) @ #release)
+ ∧
+  ∀ #issue #available.
+   (CapabilityIssued( capability, record, action, generation ) @ #issue) ∧
+   (CredentialAvailable( generation, record, password ) @ #available)
+  ⇒
+   ((¬(#issue < #release)) ∨ (¬(#available < #release)))"
+*/
+simplify
+solve( CapabilityReady( capability, record, action, generation,
+                        vault_key, password
+       ) ▶₀ #release )
+  case ApproveAndIssueCapability
+  by contradiction /* from formulas */
+qed
+
+lemma expiry_and_lock_prevent_late_release:
+  all-traces
+  "(∀ capability record action password generation #expired #release.
+     ((CapabilityExpired( capability, generation ) @ #expired) ∧
+      (SecretReleased( capability, record, action, password, generation
+       ) @ #release)) ⇒
+     (⊥)) ∧
+   (∀ capability record action password generation #locked #release.
+     ((VaultLocked( generation ) @ #locked) ∧
+      (SecretReleased( capability, record, action, password, generation
+       ) @ #release)) ⇒
+     (#release < #locked))"
+/*
+guarded formula characterizing all counter-examples:
+"((∃ capability record action password generation #expired #release.
+    (CapabilityExpired( capability, generation ) @ #expired) ∧
+    (SecretReleased( capability, record, action, password, generation
+     ) @ #release)) ∨
+  (∃ capability record action password generation #locked #release.
+    (VaultLocked( generation ) @ #locked) ∧
+    (SecretReleased( capability, record, action, password, generation
+     ) @ #release)
+   ∧
+    ¬(#release < #locked)))"
+*/
+by sorry
+
+lemma no_capability_replay:
+  all-traces
+  "∀ capability record1 record2 action1 action2 password1 password2
+     generation1 generation2 #i #j.
+    ((SecretReleased( capability, record1, action1, password1, generation1
+      ) @ #i) ∧
+     (SecretReleased( capability, record2, action2, password2, generation2
+      ) @ #j)) ⇒
+    (#i = #j)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ capability record1 record2 action1 action2 password1 password2
+   generation1 generation2 #i #j.
+  (SecretReleased( capability, record1, action1, password1, generation1
+   ) @ #i) ∧
+  (SecretReleased( capability, record2, action2, password2, generation2
+   ) @ #j)
+ ∧
+  ¬(#i = #j)"
+*/
+by sorry
+
+lemma vault_key_secrecy:
+  all-traces
+  "∀ vault_key generation #created #known.
+    ((VaultInitialized( vault_key, generation ) @ #created) ∧
+     (K( vault_key ) @ #known)) ⇒
+    (⊥)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ vault_key generation #created #known.
+  (VaultInitialized( vault_key, generation ) @ #created) ∧
+  (K( vault_key ) @ #known)"
+*/
+by sorry
+
+/* All wellformedness checks were successful. */
+
+/*
+Generated from:
+Tamarin version 1.12.0
+Maude version 3.5.1
+Git revision: 82780bbaf3328a45f624ddb41e51bf75425f851c (with uncommited changes), branch: master
+Compiled at: 2026-03-07 14:22:39.174278293 UTC
+*/
+
+end
+
+==============================================================================
+summary of summaries:
+
+analyzed: broker_capability_final.spthy
+
+  processing time: 0.95s
+  
+  executability (exists-trace): analysis incomplete (1 steps)
+  approval_required_before_release (all-traces): analysis incomplete (1 steps)
+  release_matches_issued_scope_and_password (all-traces): verified (3 steps)
+  expiry_and_lock_prevent_late_release (all-traces): analysis incomplete (1 steps)
+  no_capability_replay (all-traces): analysis incomplete (1 steps)
+  vault_key_secrecy (all-traces): analysis incomplete (1 steps)
+
+==============================================================================

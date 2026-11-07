@@ -1,0 +1,5 @@
+Python 3.14.7
+ruff 0.16.5
+mypy 1.20.2 (compiled: yes)
+pip 26.2.1 from E:\Cybersecurity and AI Dissertation Project\New Code Part\password_manager\.venv\Lib\site-packages\pip (python 3.14)
+

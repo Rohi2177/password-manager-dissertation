@@ -1,0 +1,6 @@
+  executability (exists-trace): verified (7 steps)
+  approval_required_before_release (all-traces): verified (3 steps)
+  release_matches_issued_scope_and_password (all-traces): verified (3 steps)
+  expiry_and_lock_prevent_late_release (all-traces): verified (18 steps)
+  no_capability_replay (all-traces): verified (8 steps)
+  vault_key_secrecy (all-traces): verified (2 steps)
